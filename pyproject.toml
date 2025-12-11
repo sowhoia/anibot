@@ -1,0 +1,54 @@
+[tool.poetry]
+name = "anibot"
+version = "0.1.0"
+description = "Минималистичный Telegram-бот для просмотра аниме через Kodik"
+authors = ["AniBot Team <dev@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+aiogram = "^3.13.1"
+pydantic-settings = "^2.6.1"
+httpx = "^0.27.2"
+SQLAlchemy = "^2.0.36"
+asyncpg = "^0.30.0"
+alembic = "^1.13.3"
+redis = "^5.2.0"
+APScheduler = "^3.10.4"
+anime-parsers-ru = "^0.6.6"
+rapidfuzz = "^3.9.3"
+loguru = "^0.7.2"
+pyrogram = "^2.0.106"
+tgcrypto = "^1.2.5"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.3"
+ruff = "^0.6.8"
+black = "^24.10.0"
+isort = "^5.13.2"
+mypy = "^1.13.0"
+
+[build-system]
+requires = ["poetry-core>=1.8.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+fix = true
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "SIM", "ASYNC"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
