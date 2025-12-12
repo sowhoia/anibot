@@ -22,7 +22,6 @@ from pyrogram import Client
 from pyrogram.types import Message
 
 from app.config import settings
-from app.db import repo
 from app.db.repo import AnimeRepository
 from app.db.session import get_session
 
@@ -103,6 +102,18 @@ class OrderedUploadQueue:
         """
         self._client = client
         self._chat_id = chat_id or settings.upload_chat_id
+        self._chat_validated = False
+        
+        # Валидация chat_id
+        if not self._chat_id:
+            raise ValueError("UPLOAD_CHAT_ID не настроен в .env")
+        
+        # Для "me" используем строку (Pyrogram понимает это как Saved Messages)
+        if self._chat_id == "me":
+            logger.info("Using 'me' as chat_id (Saved Messages)")
+        else:
+            logger.info("Using chat_id: {}", self._chat_id)
+        
         self._delete_after_upload = delete_after_upload
         self._session_factory = get_session()
 
@@ -159,7 +170,7 @@ class OrderedUploadQueue:
                     result = await self._process_task(task)
                     if result.success:
                         logger.info(
-                            "Upload completed: {} -> msg_id={}",
+                            "Video upload completed: {} -> msg_id={} (streamable)",
                             task.episode_id,
                             result.message.id,
                         )
@@ -180,6 +191,30 @@ class OrderedUploadQueue:
 
         logger.info("Upload worker stopped for {}", key)
 
+    async def _validate_chat_access(self) -> None:
+        """Проверяет и получает доступ к чату перед загрузкой."""
+        if self._chat_validated or self._chat_id == "me":
+            return
+        
+        try:
+            # Получаем информацию о чате, чтобы Pyrogram "познакомился" с ним
+            chat = await self._client.get_chat(self._chat_id)
+            logger.info(
+                "Chat validated: {} (type: {})",
+                chat.title if hasattr(chat, 'title') else chat.id,
+                chat.type
+            )
+            self._chat_validated = True
+        except Exception as e:
+            logger.warning(
+                "Could not validate chat {}: {}. Will use 'me' as fallback.",
+                self._chat_id,
+                e
+            )
+            # Используем "me" как fallback
+            self._chat_id = "me"
+            self._chat_validated = True
+
     async def _process_task(self, task: EpisodeUploadTask) -> UploadResult:
         """
         Обрабатывает задачу загрузки.
@@ -193,6 +228,9 @@ class OrderedUploadQueue:
         task.status = UploadStatus.UPLOADING
 
         try:
+            # Валидируем доступ к чату при первой загрузке
+            await self._validate_chat_access()
+            
             # Проверяем существование файла
             if not Path(task.file_path).exists():
                 raise FileNotFoundError(f"File not found: {task.file_path}")
@@ -200,20 +238,23 @@ class OrderedUploadQueue:
             # Подготавливаем кнопки
             buttons = task.buttons_factory() if task.buttons_factory else None
 
-            # Загружаем файл
+            # Загружаем файл как видео
             logger.info(
-                "Uploading {} (anime={}, tr={}, ep={})",
+                "Uploading video {} (anime={}, tr={}, ep={}) to chat_id={}",
                 task.episode_id,
                 task.anime_id,
                 task.translation_id,
                 task.number,
+                self._chat_id,
             )
 
-            msg = await self._client.send_document(
+            # Загружаем файл как видео (для просмотра в Telegram)
+            msg = await self._client.send_video(
                 chat_id=self._chat_id,
-                document=task.file_path,
+                video=task.file_path,
                 caption=task.caption,
                 reply_markup=buttons,
+                supports_streaming=True,  # Включаем стриминг для просмотра без скачивания
             )
 
             # Сохраняем в БД
@@ -224,11 +265,11 @@ class OrderedUploadQueue:
                         episode_id=task.episode_id,
                         chat_id=str(msg.chat.id),
                         message_id=msg.id,
-                        file_unique_id=getattr(msg.document, "file_unique_id", None),
+                        file_unique_id=getattr(msg.video, "file_unique_id", None),
                         quality=task.quality,
                         source_url=None,
                         checksum=task.checksum,
-                        size_bytes=task.size_bytes or getattr(msg.document, "file_size", None),
+                        size_bytes=task.size_bytes or getattr(msg.video, "file_size", None),
                     )
 
             task.status = UploadStatus.COMPLETED
@@ -336,6 +377,16 @@ async def get_upload_client() -> Client:
     if _client is None:
         _client = build_pyrogram_client()
         await _client.start()
+        
+        # Проверяем, что клиент авторизован
+        try:
+            me = await _client.get_me()
+            logger.info("Pyrogram client authorized as: {} (@{})", me.first_name, me.username)
+        except Exception as e:
+            logger.error("Failed to get user info from Pyrogram: {}", e)
+            logger.error("Убедитесь, что USER_API_SESSION_STRING настроен в .env")
+            raise
+    
     return _client
 
 

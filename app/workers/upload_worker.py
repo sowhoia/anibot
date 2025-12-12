@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import signal
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
@@ -21,7 +21,8 @@ from loguru import logger
 from app.common.async_utils import retry_async
 from app.common.logging import setup_logging
 from app.config import settings
-from app.db import repo
+from app.db import models
+from app.db.repo import AnimeRepository
 from app.db.session import get_session
 from app.integrations.telegram_uploader import (
     EpisodeUploadTask,
@@ -47,7 +48,7 @@ class WorkerStats:
             "processed_count": self.processed_count,
             "failed_count": self.failed_count,
             "last_poll_at": self.last_poll_at.isoformat() if self.last_poll_at else None,
-            "uptime_seconds": (datetime.utcnow() - self.started_at).total_seconds(),
+            "uptime_seconds": (datetime.now(timezone.utc) - self.started_at).total_seconds(),
         }
 
 
@@ -81,7 +82,7 @@ class UploadWorker:
         self._queue: OrderedUploadQueue | None = None
 
         self._shutdown_event = asyncio.Event()
-        self._stats = WorkerStats(started_at=datetime.utcnow())
+        self._stats = WorkerStats(started_at=datetime.now(timezone.utc))
 
     async def start(self) -> None:
         """Запускает worker."""
@@ -155,12 +156,12 @@ class UploadWorker:
 
     async def _poll_and_process(self) -> None:
         """Опрашивает БД и обрабатывает эпизоды."""
-        self._stats.last_poll_at = datetime.utcnow()
+        self._stats.last_poll_at = datetime.now(timezone.utc)
 
         # Получаем эпизоды без медиа
         async with self._session_factory() as session:
-            episodes = await repo.get_episodes_without_media(
-                session,
+            repository = AnimeRepository(session)
+            episodes = await repository.get_episodes_without_media(
                 limit=self._batch_size,
             )
 
@@ -176,12 +177,22 @@ class UploadWorker:
 
             await self._process_episode(ep)
 
-    async def _process_episode(self, ep) -> None:
+    async def _process_episode(self, ep: models.Episode) -> None:
         """Обрабатывает один эпизод."""
         external_ids = (ep.anime.external_ids if ep.anime else {}) or {}
 
         if not external_ids:
             logger.warning("Episode {} has no external IDs, skipping", ep.id)
+            self._stats.failed_count += 1
+            return
+
+        # Пропускаем эпизоды с невалидным translation_id
+        # translation_id=0 означает что данные о переводе отсутствуют
+        if ep.translation_id == 0:
+            logger.warning(
+                "Episode {} has invalid translation_id=0, skipping",
+                ep.id
+            )
             self._stats.failed_count += 1
             return
 
@@ -202,7 +213,7 @@ class UploadWorker:
                 anime_id=ep.anime_id,
                 translation_id=ep.translation_id,
                 number=ep.number,
-                file_path=str(result.path),
+                file_path=str(result.path),  # result.path уже является Path объектом
                 caption=self._build_caption(ep),
                 quality=None,
                 checksum=result.checksum,
@@ -233,15 +244,21 @@ class UploadWorker:
             )
             self._stats.failed_count += 1
 
-    async def _download_episode(self, ep, external_ids: dict) -> DownloadResult:
+    async def _download_episode(
+        self, ep: models.Episode, external_ids: dict[str, Any]
+    ) -> DownloadResult:
         """Скачивает эпизод."""
-        return await self._downloader.download_episode(
+        from app.services.downloader import DownloadRequest
+        
+        request = DownloadRequest(
             external_ids=external_ids,
             translation_id=ep.translation_id,
             episode_num=ep.number,
+            quality=720,
         )
+        return await self._downloader.download(request)
 
-    def _build_caption(self, ep) -> str:
+    def _build_caption(self, ep: models.Episode) -> str:
         """Формирует caption для сообщения."""
         anime_title = ep.anime.title if ep.anime else ep.anime_id
         return f"{anime_title} — серия {ep.number}"

@@ -206,27 +206,6 @@ class Downloader:
                 {"original_error": str(exc)},
             ) from exc
 
-    async def download_episode(
-        self,
-        external_ids: dict[str, Any],
-        translation_id: int,
-        episode_num: int,
-        quality: int = 720,
-    ) -> Path:
-        """
-        Legacy метод для обратной совместимости.
-
-        Рекомендуется использовать download() с DownloadRequest.
-        """
-        request = DownloadRequest(
-            external_ids=external_ids,
-            translation_id=translation_id,
-            episode_num=episode_num,
-            quality=quality,
-        )
-        result = await self.download(request)
-        return result.path
-
     async def _get_m3u8(self, request: DownloadRequest) -> str:
         """Получает URL m3u8 плейлиста."""
         try:

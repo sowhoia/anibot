@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import signal
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from loguru import logger
@@ -72,7 +72,7 @@ class DeltaSyncWorker:
         self._client = get_kodik_client()
         self._ingest = IngestService(get_session())
         self._shutdown_event = asyncio.Event()
-        self._stats = SyncStats(started_at=datetime.utcnow())
+        self._stats = SyncStats(started_at=datetime.now(timezone.utc))
 
     async def start(self) -> None:
         """Запускает worker."""
@@ -134,7 +134,7 @@ class DeltaSyncWorker:
             Статистика синхронизации
         """
         if updated_since is None:
-            updated_since = datetime.utcnow() - timedelta(hours=self._lookback_hours)
+            updated_since = datetime.now(timezone.utc) - timedelta(hours=self._lookback_hours)
 
         if isinstance(updated_since, datetime):
             ts = updated_since.isoformat()
@@ -142,7 +142,7 @@ class DeltaSyncWorker:
             ts = updated_since
 
         logger.info("Starting delta sync (updated_since={})", ts)
-        self._stats.last_sync_at = datetime.utcnow()
+        self._stats.last_sync_at = datetime.now(timezone.utc)
 
         try:
             # Получаем обновления

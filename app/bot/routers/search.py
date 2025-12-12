@@ -16,27 +16,16 @@ from aiogram.types import (
 
 from app.bot.keyboards.common import pagination_keyboard
 from app.config import settings
-from app.services.search import SearchResult, SearchService, get_search_service
+from app.services.search import SearchResult, get_search_service
 
 router = Router(name="search")
-
-# Используем singleton сервис
-_search_service: SearchService | None = None
-
-
-def get_service() -> SearchService:
-    """Возвращает сервис поиска."""
-    global _search_service
-    if _search_service is None:
-        _search_service = get_search_service()
-    return _search_service
 
 
 @router.message(F.text, F.text.len() >= 2)
 async def handle_search(message: Message) -> None:
     """Обрабатывает поисковый запрос."""
     query = message.text.strip()
-    service = get_service()
+    service = get_search_service()
 
     result = await service.search(
         query=query,
@@ -69,7 +58,7 @@ async def handle_page(callback: CallbackQuery) -> None:
         await callback.answer("Не удалось определить запрос")
         return
 
-    service = get_service()
+    service = get_search_service()
     result = await service.search(
         query=query,
         page=page,

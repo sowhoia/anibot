@@ -61,6 +61,10 @@ class Settings(BaseSettings):
         default="me",
         description="ID чата для загрузки видео (число или username)",
     )
+    telegram_proxy_url: str | None = Field(
+        default=None,
+        description="Прокси для Telegram API (http://user:pass@host:port или socks5://host:port)",
+    )
 
     # ================== Database ==================
     postgres_dsn: Annotated[str, PostgresDsn] = Field(
@@ -124,8 +128,8 @@ class Settings(BaseSettings):
         le=3600,
     )
     max_file_size_mb: int = Field(
-        default=2000,
-        description="Максимальный размер файла для загрузки (MB)",
+        default=4000,
+        description="Максимальный размер файла для загрузки (MB) - 4GB для премиум",
         ge=100,
         le=4000,
     )
@@ -240,7 +244,7 @@ class AppConstants:
     # Telegram лимиты
     TG_MAX_MESSAGE_LENGTH: int = 4096
     TG_MAX_CAPTION_LENGTH: int = 1024
-    TG_MAX_FILE_SIZE: int = 2 * 1024 * 1024 * 1024  # 2 GB
+    TG_MAX_FILE_SIZE: int = 4 * 1024 * 1024 * 1024  # 4 GB (Premium)
 
     # Retry конфигурация
     MAX_RETRIES: int = 3

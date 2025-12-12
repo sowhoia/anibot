@@ -16,10 +16,15 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, TypeAlias
 
+import httpx
 from anime_parsers_ru import KodikParserAsync
 from loguru import logger
 
 from app.config import settings
+
+
+# URL для прямого API Kodik
+KODIK_API_BASE = "https://kodikapi.com"
 
 
 class KodikError(Exception):
@@ -150,12 +155,19 @@ class KodikClient:
         """
         Args:
             token: API токен Kodik (по умолчанию из settings)
+                  Если None или пустая строка, библиотека будет использовать публичные токены
             rps_limit: Лимит запросов в секунду (по умолчанию из settings)
         """
-        self._token = token or settings.kodik_token
+        # Если токен не указан, используем из settings (может быть None для публичных токенов)
+        self._token = token if token is not None else settings.kodik_token
+        # Если токен пустая строка, конвертируем в None для автоматического получения публичных
+        if self._token == "":
+            self._token = None
         self._parser = KodikParserAsync(token=self._token)
         self._rps_limit = rps_limit or settings.kodik_rps_limit
         self._rate_limiter = RateLimiter(rate=self._rps_limit)
+        # Переиспользуемый httpx клиент для прямых API запросов
+        self._http_client: httpx.AsyncClient | None = None
 
     async def fetch_full_list(
         self,
@@ -321,9 +333,19 @@ class KodikClient:
         limit_per_page: int,
         start_from: str | None,
     ) -> tuple[KodikItems, str | None]:
-        """Внутренний метод получения страницы."""
+        """
+        Внутренний метод получения страницы.
+        
+        Использует прямой HTTP запрос к API Kodik для получения
+        полных данных включая translation.
+        """
         await self._rate_limiter.acquire()
 
+        # Если есть токен, используем прямой API для полных данных
+        if self._token:
+            return await self._fetch_page_direct_api(limit_per_page, start_from)
+        
+        # Fallback на библиотеку если нет токена
         batch, next_from = await self._parser.get_list(
             limit_per_page=limit_per_page,
             pages_to_parse=1,
@@ -332,6 +354,79 @@ class KodikClient:
             start_from=start_from,
         )
         return batch, next_from
+
+    async def _get_http_client(self) -> httpx.AsyncClient:
+        """Возвращает переиспользуемый httpx клиент."""
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(60.0, connect=30.0)
+            )
+        return self._http_client
+
+    async def close(self) -> None:
+        """Закрывает HTTP клиент."""
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
+
+    async def _fetch_page_direct_api(
+        self,
+        limit_per_page: int,
+        start_from: str | None,
+    ) -> tuple[KodikItems, str | None]:
+        """
+        Получает страницу напрямую через API Kodik.
+
+        Возвращает полные данные включая translation с id, title, type.
+        """
+        from urllib.parse import parse_qs, urlparse
+
+        params = {
+            "token": self._token,
+            "limit": limit_per_page,
+            "types": "anime,anime-serial",
+            "with_material_data": "true",
+            "with_episodes": "true",
+            "sort": "updated_at",
+            "order": "desc",
+        }
+
+        if start_from:
+            # start_from - это URL следующей страницы или параметр next
+            if start_from.startswith("http"):
+                # Это полный URL, извлекаем параметр next
+                parsed = urlparse(start_from)
+                qs = parse_qs(parsed.query)
+                if "next" in qs:
+                    params["next"] = qs["next"][0]
+            else:
+                params["next"] = start_from
+
+        client = await self._get_http_client()
+        for attempt in range(3):
+            try:
+                response = await client.get(f"{KODIK_API_BASE}/list", params=params)
+                response.raise_for_status()
+                data = response.json()
+                break
+            except (httpx.ConnectTimeout, httpx.ReadTimeout) as e:
+                if attempt == 2:
+                    raise
+                logger.warning("Kodik API timeout, retry {}/3: {}", attempt + 1, e)
+                await asyncio.sleep(2 ** attempt)
+
+        results = data.get("results", [])
+        next_page = data.get("next_page")
+
+        # Извлекаем параметр next из next_page URL
+        next_from = None
+        if next_page:
+            parsed = urlparse(next_page)
+            qs = parse_qs(parsed.query)
+            if "next" in qs:
+                next_from = qs["next"][0]
+
+        return results, next_from
 
     async def _get_m3u8_internal(
         self,

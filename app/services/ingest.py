@@ -94,11 +94,9 @@ class IngestService:
                 else:
                     raise
 
-        # Сохраняем в БД
+        # Сохраняем в БД - каждый bundle в отдельной транзакции
         if bundles:
-            async with self._session_factory() as session:
-                async with session.begin():
-                    await self._persist_bundles(session, bundles, stats)
+            await self._persist_bundles_isolated(bundles, stats)
 
         logger.info(
             "Ingest complete: {}/{} successful, {} failed",
@@ -126,22 +124,29 @@ class IngestService:
 
         async with self._session_factory() as session:
             async with session.begin():
-                await self._persist_bundle(session, bundle)
+                repo = AnimeRepository(session)
+                await self._persist_bundle_with_repo(repo, bundle)
 
         return bundle
 
-    async def _persist_bundles(
+    async def _persist_bundles_isolated(
         self,
-        session: AsyncSession,
         bundles: list[NormalizedAnimeBundle],
         stats: IngestStats,
     ) -> None:
-        """Сохраняет список bundles в БД."""
-        repo = AnimeRepository(session)
-
+        """
+        Сохраняет список bundles в БД.
+        
+        Каждый bundle сохраняется в отдельной транзакции для изоляции ошибок.
+        Если один bundle падает, остальные продолжают сохраняться.
+        """
         for bundle in bundles:
             try:
-                await self._persist_bundle_with_repo(repo, bundle)
+                # Каждый bundle в отдельной транзакции
+                async with self._session_factory() as session:
+                    async with session.begin():
+                        repo = AnimeRepository(session)
+                        await self._persist_bundle_with_repo(repo, bundle)
                 stats.successful += 1
             except Exception as exc:
                 anime_id = bundle.anime.get("id")
@@ -153,15 +158,6 @@ class IngestService:
                     anime_id,
                     error_msg,
                 )
-
-    async def _persist_bundle(
-        self,
-        session: AsyncSession,
-        bundle: NormalizedAnimeBundle,
-    ) -> None:
-        """Сохраняет один bundle в БД (legacy метод)."""
-        repo = AnimeRepository(session)
-        await self._persist_bundle_with_repo(repo, bundle)
 
     async def _persist_bundle_with_repo(
         self,

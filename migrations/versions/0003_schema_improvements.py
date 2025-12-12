@@ -67,10 +67,10 @@ def upgrade() -> None:
 
     # GIN индексы для JSONB полей
     op.execute(
-        "CREATE INDEX ix_anime_alt_titles_gin ON anime USING GIN (alt_titles)"
+        "CREATE INDEX ix_anime_alt_titles_gin ON anime USING GIN (alt_titles jsonb_path_ops)"
     )
     op.execute(
-        "CREATE INDEX ix_anime_genres_gin ON anime USING GIN (genres)"
+        "CREATE INDEX ix_anime_genres_gin ON anime USING GIN (genres jsonb_path_ops)"
     )
 
     # Частичный индекс для аниме с рейтингом

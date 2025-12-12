@@ -1,5 +1,4 @@
 import asyncio
-from logging.config import fileConfig
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -11,8 +10,8 @@ from app.db.models import Base
 
 config = context.config
 
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# Логирование настраивается через loguru в app.common.logging
+# fileConfig не используется
 
 target_metadata = Base.metadata
 

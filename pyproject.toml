@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Минималистичный Telegram-бот для просмотра аниме через Kodik"
 authors = ["AniBot Team <dev@example.com>"]
 readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -15,11 +16,12 @@ asyncpg = "^0.30.0"
 alembic = "^1.13.3"
 redis = "^5.2.0"
 APScheduler = "^3.10.4"
-anime-parsers-ru = "^0.6.6"
+anime-parsers-ru = "^1.13.1"
 rapidfuzz = "^3.9.3"
 loguru = "^0.7.2"
 pyrogram = "^2.0.106"
 tgcrypto = "^1.2.5"
+aiohttp-socks = "^0.9.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"

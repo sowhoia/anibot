@@ -8,22 +8,25 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Sequence, TypeVar
+from typing import Any, Sequence
 
 from loguru import logger
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import models
 
-T = TypeVar("T")
-
 
 def utc_now() -> datetime:
-    """Возвращает текущее время в UTC."""
-    return datetime.now(timezone.utc)
+    """
+    Возвращает текущее время в UTC без timezone info.
+    
+    Используется для колонок TIMESTAMP WITHOUT TIME ZONE в PostgreSQL.
+    Все времена хранятся в UTC, но без явного указания timezone.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class AnimeRepository:
@@ -400,8 +403,6 @@ class AnimeRepository:
         Returns:
             True если запись была удалена, False если её не было
         """
-        from sqlalchemy import delete
-
         result = await self._session.execute(
             delete(models.Favorite).where(
                 models.Favorite.user_id == user_id,
@@ -589,77 +590,3 @@ class AnimeRepository:
             )
         )
         return result.scalar() or 0
-
-
-# ==================== Legacy Functions (для обратной совместимости) ====================
-
-
-async def upsert_translation(session: AsyncSession, translation: dict) -> None:
-    """Legacy функция для обратной совместимости."""
-    repo = AnimeRepository(session)
-    await repo.upsert_translation(translation)
-
-
-async def upsert_anime(session: AsyncSession, anime: dict) -> None:
-    """Legacy функция для обратной совместимости."""
-    repo = AnimeRepository(session)
-    await repo.upsert_anime(anime)
-
-
-async def upsert_anime_translation(session: AsyncSession, link: dict) -> None:
-    """Legacy функция для обратной совместимости."""
-    repo = AnimeRepository(session)
-    await repo.upsert_anime_translation(link)
-
-
-async def upsert_episodes(
-    session: AsyncSession,
-    episodes: Sequence[dict],
-) -> None:
-    """Legacy функция для обратной совместимости."""
-    repo = AnimeRepository(session)
-    await repo.upsert_episodes(list(episodes))
-
-
-async def mark_media(
-    session: AsyncSession,
-    episode_id: str,
-    chat_id: str,
-    message_id: int,
-    file_unique_id: str | None,
-    quality: int | None,
-    source_url: str | None,
-    checksum: str | None,
-    size_bytes: int | None,
-) -> None:
-    """Legacy функция для обратной совместимости."""
-    repo = AnimeRepository(session)
-    await repo.mark_media(
-        episode_id=episode_id,
-        chat_id=chat_id,
-        message_id=message_id,
-        file_unique_id=file_unique_id,
-        quality=quality,
-        source_url=source_url,
-        checksum=checksum,
-        size_bytes=size_bytes,
-    )
-
-
-async def get_episodes_without_media(
-    session: AsyncSession,
-    limit: int = 20,
-) -> list[models.Episode]:
-    """Legacy функция для обратной совместимости."""
-    repo = AnimeRepository(session)
-    return await repo.get_episodes_without_media(limit)
-
-
-async def touch_user(
-    session: AsyncSession,
-    user_id: int,
-    payload: dict,
-) -> None:
-    """Legacy функция для обратной совместимости."""
-    repo = AnimeRepository(session)
-    await repo.touch_user(user_id, payload)
